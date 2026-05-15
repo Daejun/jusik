@@ -55,6 +55,7 @@ def _cmd_grid(args: argparse.Namespace) -> int:
         start=args.start, end=args.end, config=cfg,
         budget_mode=args.budget_mode, grids=grids,
         extra_codes=["069500"] if "benchmark" in grids else None,
+        trade_modes=args.trade_modes,
     )
     import pandas as pd
     lb = pd.read_csv(out / "leaderboard.csv")
@@ -123,6 +124,9 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("--budget-mode", choices=["fixed", "compound"], default="fixed")
     gr.add_argument("--strategies", nargs="+", default=None,
                     help="subset of strategies (default: all in grid)")
+    gr.add_argument("--trade-modes", nargs="+", default=["intraday"],
+                    choices=["intraday", "overnight", "multiday5"],
+                    help="trade modes to compare (default: intraday)")
     gr.set_defaults(func=_cmd_grid)
 
     cmp = sub.add_parser("compare", help="run all strategies and compare")

@@ -14,7 +14,7 @@ import pandas as pd
 
 from .config import RESULTS_DIR, SimConfig
 from .data import MarketData, load_market_data
-from .engine import run_backtest
+from .engine import TRADE_MODES, run_backtest
 from .strategies import build
 
 log = logging.getLogger(__name__)
@@ -46,9 +46,11 @@ def run_grid(
     grids: dict[str, dict[str, list]] | None = None,
     out_dir: Path | None = None,
     extra_codes: list[str] | None = None,
+    trade_modes: list[str] | None = None,
 ) -> Path:
     cfg = config or SimConfig()
     grids = grids or DEFAULT_GRIDS
+    trade_modes = trade_modes or ["intraday"]
 
     market: MarketData = load_market_data(start, end, top_n=cfg.universe_size)
 
@@ -70,37 +72,44 @@ def run_grid(
     rows = []
     daily_frames: list[tuple[str, pd.DataFrame]] = []
 
-    for strategy_name, grid in grids.items():
-        for params in _expand(grid):
-            label = f"{strategy_name}({','.join(f'{k}={v}' for k,v in params.items())})"
-            try:
-                strategy = build(strategy_name, **params)
-                result = run_backtest(
-                    strategy=strategy, start=start, end=end,
-                    config=cfg, budget_mode=budget_mode, market=market,
+    for tm in trade_modes:
+        if tm not in TRADE_MODES:
+            log.warning("unknown trade mode: %s — skip", tm)
+            continue
+        for strategy_name, grid in grids.items():
+            for params in _expand(grid):
+                base = f"{strategy_name}({','.join(f'{k}={v}' for k,v in params.items())})"
+                label = f"[{tm}] {base}"
+                try:
+                    strategy = build(strategy_name, **params)
+                    result = run_backtest(
+                        strategy=strategy, start=start, end=end,
+                        config=cfg, budget_mode=budget_mode, market=market,
+                        trade_mode=tm,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    log.warning("%s failed: %s", label, e)
+                    continue
+                s = result.summary
+                rows.append({
+                    "label": label,
+                    "trade_mode": tm,
+                    "strategy": strategy_name,
+                    "params": json.dumps(params, sort_keys=True),
+                    **{k: s.get(k) for k in (
+                        "total_pnl", "total_return", "trading_days", "win_rate",
+                        "avg_daily_return", "stdev_daily_return", "sharpe_approx",
+                        "max_daily_gain", "max_daily_loss",
+                    )},
+                })
+                daily_frames.append((label, result.daily))
+                log.info(
+                    "%-70s ret=%+.2f%% sharpe=%+.2f wr=%.1f%%",
+                    label,
+                    (s.get("total_return", 0) or 0) * 100,
+                    s.get("sharpe_approx", 0) or 0,
+                    (s.get("win_rate", 0) or 0) * 100,
                 )
-            except Exception as e:  # noqa: BLE001
-                log.warning("%s failed: %s", label, e)
-                continue
-            s = result.summary
-            rows.append({
-                "label": label,
-                "strategy": strategy_name,
-                "params": json.dumps(params, sort_keys=True),
-                **{k: s.get(k) for k in (
-                    "total_pnl", "total_return", "trading_days", "win_rate",
-                    "avg_daily_return", "stdev_daily_return", "sharpe_approx",
-                    "max_daily_gain", "max_daily_loss",
-                )},
-            })
-            daily_frames.append((label, result.daily))
-            log.info(
-                "%-60s ret=%+.2f%% sharpe=%+.2f wr=%.1f%%",
-                label,
-                (s.get("total_return", 0) or 0) * 100,
-                s.get("sharpe_approx", 0) or 0,
-                (s.get("win_rate", 0) or 0) * 100,
-            )
 
     if not rows:
         log.warning("grid produced no results")
