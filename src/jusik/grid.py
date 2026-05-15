@@ -94,10 +94,13 @@ def run_grid(
                 )},
             })
             daily_frames.append((label, result.daily))
-            log.info("%-60s ret=%+.2%% sharpe=%+.2f wr=%.1f%%",
-                     label, s.get("total_return", 0) or 0,
-                     s.get("sharpe_approx", 0) or 0,
-                     (s.get("win_rate", 0) or 0) * 100)
+            log.info(
+                "%-60s ret=%+.2f%% sharpe=%+.2f wr=%.1f%%",
+                label,
+                (s.get("total_return", 0) or 0) * 100,
+                s.get("sharpe_approx", 0) or 0,
+                (s.get("win_rate", 0) or 0) * 100,
+            )
 
     if not rows:
         log.warning("grid produced no results")
