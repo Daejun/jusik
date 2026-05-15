@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 
 FORWARD_ROOT = RESULTS_DIR / "forward"
+REPORTS_DIR = Path(__file__).resolve().parents[2] / "reports"
+HISTORY_BUFFER_DAYS = 240  # ~120 trading days, enough for window=60 strategies
 
 
 @dataclass
@@ -99,18 +101,22 @@ def run_session(name: str, as_of: date | None = None) -> dict:
     cfg = _load_config(name)
     out = session_dir(name)
 
-    end = as_of or (date.today() - timedelta(days=1))
+    end = as_of or date.today()
     start = date.fromisoformat(cfg.start_date)
-    if end <= start:
-        raise ValueError(f"end ({end}) must be after start ({start})")
+    if end < start:
+        raise ValueError(f"end ({end}) must be >= start ({start})")
+
+    # Load history with a buffer before start so the strategy's lookback
+    # has data even when start_date is "today".
+    data_start = start - timedelta(days=HISTORY_BUFFER_DAYS)
 
     sim = SimConfig(budget=cfg.initial_budget, universe_size=cfg.universe_size,
                     cost=TradeCost())
-    market: MarketData = load_market_data(start, end, top_n=cfg.universe_size)
+    market: MarketData = load_market_data(data_start, end, top_n=cfg.universe_size)
     if cfg.strategy_name == "benchmark":
         from .data import fetch_ohlcv
         code = cfg.strategy_params.get("code", "069500")
-        extra = fetch_ohlcv([code], start, end)
+        extra = fetch_ohlcv([code], data_start, end)
         frames = [market.panel]
         for c, df in extra.items():
             tmp = df.copy(); tmp["code"] = c; tmp.index.name = "date"
@@ -162,6 +168,14 @@ def run_session(name: str, as_of: date | None = None) -> dict:
     else:
         equity_now = cfg.initial_budget
     summary["current_equity"] = float(equity_now)
+
+    # daily snapshot saved under reports/YYYY-MM-DD/<session>.md
+    try:
+        report_path = write_daily_report(summary, get_universe_names())
+        summary["report_path"] = str(report_path)
+    except Exception as e:  # noqa: BLE001
+        log.warning("failed to write daily report for %s: %s", name, e)
+
     return summary
 
 
@@ -282,6 +296,121 @@ def format_summary(summary: dict, name_lookup: dict[str, str] | None = None) -> 
     return "\n".join(lines)
 
 
+def _render_markdown_report(summary: dict, name_lookup: dict[str, str] | None = None) -> str:
+    name_lookup = name_lookup or {}
+    name = summary["name"]
+    asof = summary["as_of"]
+    s = summary.get("summary", {}) or {}
+    params = summary.get("params", {})
+    initial = summary.get("initial_budget", 0)
+    equity = summary.get("current_equity", initial)
+    pnl_abs = equity - initial
+
+    lines = [
+        f"# {name} — {asof}",
+        "",
+        f"- strategy: `{summary.get('strategy', '')}({', '.join(f'{k}={v}' for k,v in params.items())})`",
+        f"- mode: `{summary.get('trade_mode', '')} / {summary.get('budget_mode', '')}`",
+        "",
+        "## 누적 성과",
+        "",
+        f"- 초기예산: {initial:,.0f} 원",
+        f"- 현재자본: {equity:,.0f} 원  ({(equity/initial - 1) if initial else 0:+.2%})",
+        f"- 누적 손익: {pnl_abs:+,.0f} 원",
+    ]
+    if s:
+        win = s.get("win_days", 0)
+        td = s.get("trading_days", 0)
+        lines += [
+            f"- 진입 횟수: {td}  (승 {win} / 패 {td - win}, 승률 {s.get('win_rate',0):.1%})",
+            f"- Sharpe~ : {s.get('sharpe_approx',0):.2f}",
+            f"- 최고/최저 일수익: {s.get('max_daily_gain',0):+.2%} / {s.get('max_daily_loss',0):+.2%}",
+        ]
+
+    recent = summary.get("recent_trades") or []
+    lines += ["", "## 최근 청산"]
+    if not recent:
+        lines.append("- (아직 거래 없음)")
+    else:
+        last_date = str(recent[0]["date"])[:10]
+        latest = [r for r in recent if str(r["date"])[:10] == last_date]
+        lines.append("")
+        lines.append(f"청산일: **{last_date}**")
+        lines.append("")
+        lines.append("| 종목 | 명 | 수량 | 매수가 | 매도가 | 손익 | 수익률 |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|")
+        day_pnl = 0.0
+        for r in latest:
+            name_kr = name_lookup.get(r["code"], "")
+            lines.append(
+                f"| {r['code']} | {name_kr} | {int(r['shares'])} | "
+                f"{r['open_price']:,.0f} | {r['close_price']:,.0f} | "
+                f"{r['pnl']:+,.0f} | {r['return_pct']:+.2%} |"
+            )
+            day_pnl += r["pnl"]
+        lines.append(f"\n합계: **{day_pnl:+,.0f}** 원")
+
+    nxt = summary.get("next_picks") or {}
+    picks = nxt.get("picks", [])
+    lines += ["", "## 다음 거래일 진입 추천", "", f"_{nxt.get('next_action', '')}_", ""]
+    if not picks:
+        lines.append("- (없음 — 전략이 후보를 찾지 못함)")
+    else:
+        lines.append("| 종목 | 명 | 비중 | 배분 | 사유 |")
+        lines.append("|---|---|---:|---:|---|")
+        for p in picks:
+            name_kr = name_lookup.get(p["code"], "")
+            alloc = equity * p["weight"]
+            lines.append(
+                f"| {p['code']} | {name_kr} | {p['weight']:.0%} | "
+                f"{alloc:,.0f} 원 | {p['reason']} |"
+            )
+
+    lines += ["", f"_artifacts: results/forward/{name}/_", ""]
+    return "\n".join(lines)
+
+
+def write_daily_report(summary: dict, name_lookup: dict[str, str] | None = None) -> Path:
+    asof = summary["as_of"]
+    day_dir = REPORTS_DIR / asof
+    day_dir.mkdir(parents=True, exist_ok=True)
+    path = day_dir / f"{summary['name']}.md"
+    path.write_text(_render_markdown_report(summary, name_lookup), encoding="utf-8")
+    return path
+
+
+def write_combined_index(asof: str, summaries: list[dict]) -> Path:
+    day_dir = REPORTS_DIR / asof
+    day_dir.mkdir(parents=True, exist_ok=True)
+    lines = [f"# 일별 리포트 — {asof}", ""]
+    total_equity = 0.0
+    total_initial = 0.0
+    for s in summaries:
+        if "error" in s:
+            lines.append(f"- ❌ **{s['name']}**: {s['error']}")
+            continue
+        equity = s.get("current_equity", 0)
+        initial = s.get("initial_budget", 0)
+        total_equity += equity
+        total_initial += initial
+        ret = (equity / initial - 1) if initial else 0
+        lines.append(
+            f"- [{s['name']}](./{s['name']}.md) — "
+            f"자본 {equity:,.0f}원 ({ret:+.2%}), "
+            f"진입 {s.get('summary',{}).get('trading_days',0)}회, "
+            f"승률 {s.get('summary',{}).get('win_rate',0):.1%}"
+        )
+    if total_initial:
+        lines += [
+            "",
+            f"**전체 합계**: {total_equity:,.0f}원 / {total_initial:,.0f}원 "
+            f"({(total_equity/total_initial - 1):+.2%})",
+        ]
+    path = day_dir / "index.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def run_all_sessions(as_of: date | None = None) -> list[dict]:
     names = list_sessions()
     if not names:
@@ -293,6 +422,13 @@ def run_all_sessions(as_of: date | None = None) -> list[dict]:
         except Exception as e:  # noqa: BLE001
             log.error("session %s failed: %s", n, e)
             results.append({"name": n, "error": str(e)})
+    if results:
+        asof_str = next((r.get("as_of") for r in results if r.get("as_of")), None)
+        if asof_str:
+            try:
+                write_combined_index(asof_str, results)
+            except Exception as e:  # noqa: BLE001
+                log.warning("failed to write combined index: %s", e)
     return results
 
 

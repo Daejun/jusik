@@ -5,7 +5,8 @@
 set -euo pipefail
 
 BUDGET="${BUDGET:-10000000}"
-START="${START:-2024-05-15}"
+# Default start: today so equity tracking begins fresh from the next session.
+START="${START:-$(date +%F)}"
 
 run_init() {
     local name="$1"; shift
