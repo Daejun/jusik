@@ -49,6 +49,28 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_validate(args: argparse.Namespace) -> int:
+    from .validate import walk_forward
+    cfg = SimConfig(budget=args.budget, universe_size=args.universe)
+    out = walk_forward(
+        start=args.start, end=args.end,
+        is_pct=args.is_pct, top_k=args.top_k, rank_by=args.rank_by,
+        config=cfg, trade_modes=args.trade_modes,
+    )
+    import pandas as pd
+    df = pd.read_csv(out / "comparison.csv")
+    print("\n=== IN-SAMPLE vs OUT-OF-SAMPLE ===")
+    cols = ["label", "is_return", "oos_return", "is_sharpe", "oos_sharpe",
+            "is_winrate", "oos_winrate", "oos_max_loss"]
+    with pd.option_context("display.float_format", lambda x: f"{x:+.3f}",
+                           "display.max_colwidth", 65, "display.width", 220):
+        print(df[cols].to_string(index=False))
+    surv = df[df["oos_return"] > 0]
+    print(f"\n{len(surv)}/{len(df)} survived OOS with positive return")
+    print(f"artifacts: {out}")
+    return 0
+
+
 def _cmd_grid(args: argparse.Namespace) -> int:
     from .grid import DEFAULT_GRIDS, run_grid
     cfg = SimConfig(budget=args.budget, universe_size=args.universe)
@@ -225,6 +247,19 @@ def main(argv: list[str] | None = None) -> int:
 
     fl = fwsub.add_parser("list", help="list forward sessions")
     fl.set_defaults(func=_cmd_forward_list)
+
+    vd = sub.add_parser("validate", help="walk-forward IS/OOS validation")
+    vd.add_argument("--start", type=_parse_date, default=today - timedelta(days=730))
+    vd.add_argument("--end", type=_parse_date, default=today - timedelta(days=1))
+    vd.add_argument("--budget", type=float, default=10_000_000)
+    vd.add_argument("--universe", type=int, default=200)
+    vd.add_argument("--is-pct", type=float, default=0.7,
+                    help="fraction of period used for in-sample")
+    vd.add_argument("--top-k", type=int, default=5)
+    vd.add_argument("--rank-by", default="sharpe_approx",
+                    choices=["sharpe_approx", "total_return", "win_rate"])
+    vd.add_argument("--trade-modes", nargs="+", default=["overnight", "multiday5"])
+    vd.set_defaults(func=_cmd_validate)
 
     gr = sub.add_parser("grid", help="parameter grid search across strategies")
     gr.add_argument("--start", type=_parse_date, default=today - timedelta(days=730))
