@@ -193,6 +193,11 @@ def run_backtest(
     panel = market.panel
     if panel.empty:
         raise RuntimeError("no market data loaded")
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    panel = panel[(panel["date"] >= start_ts) & (panel["date"] <= end_ts)]
+    if panel.empty:
+        raise RuntimeError(f"market panel has no rows in [{start}, {end}]")
 
     dates = sorted(panel["date"].unique())
     day_results: list[DayResult] = []
