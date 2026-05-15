@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jusik"
+version = "0.1.0"
+description = "KOSPI200 open-buy / close-sell trading simulator"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "pyarrow>=14",
+    "yfinance>=0.2",
+    "finance-datareader>=0.9",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+jusik = "jusik.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
