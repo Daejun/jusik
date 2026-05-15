@@ -5,6 +5,7 @@ import logging
 import sys
 from datetime import date, datetime, timedelta
 
+from .compare import compare_strategies
 from .config import SimConfig, TradeCost
 from .engine import run_backtest
 from .reporter import print_summary, write_report
@@ -44,6 +45,26 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compare(args: argparse.Namespace) -> int:
+    cfg = SimConfig(budget=args.budget, top_n=args.top_n, universe_size=args.universe)
+    specs = [{"name": s, "params": {"top_n": args.top_n}} for s in args.strategies]
+    out = compare_strategies(
+        strategy_specs=specs,
+        start=args.start,
+        end=args.end,
+        config=cfg,
+        budget_mode=args.budget_mode,
+    )
+    import pandas as pd
+    lb = pd.read_csv(out / "leaderboard.csv")
+    print("\n=== leaderboard ===")
+    cols = ["label", "total_return", "win_rate", "sharpe_approx", "max_daily_loss"]
+    with pd.option_context("display.float_format", lambda x: f"{x:.4f}"):
+        print(lb[cols].to_string(index=False))
+    print(f"\nartifacts: {out}")
+    return 0
+
+
 def _cmd_list(_: argparse.Namespace) -> int:
     print("strategies:")
     for name, cls in REGISTRY.items():
@@ -70,6 +91,16 @@ def main(argv: list[str] | None = None) -> int:
 
     ls = sub.add_parser("list", help="list strategies")
     ls.set_defaults(func=_cmd_list)
+
+    cmp = sub.add_parser("compare", help="run all strategies and compare")
+    cmp.add_argument("--strategies", nargs="+", default=list(REGISTRY))
+    cmp.add_argument("--start", type=_parse_date, default=today - timedelta(days=365))
+    cmp.add_argument("--end", type=_parse_date, default=today - timedelta(days=1))
+    cmp.add_argument("--budget", type=float, default=10_000_000)
+    cmp.add_argument("--top-n", type=int, default=5)
+    cmp.add_argument("--universe", type=int, default=200)
+    cmp.add_argument("--budget-mode", choices=["fixed", "compound"], default="fixed")
+    cmp.set_defaults(func=_cmd_compare)
 
     args = parser.parse_args(argv)
     return args.func(args)

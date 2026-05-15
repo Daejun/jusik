@@ -1,8 +1,12 @@
 from .base import Pick, Strategy
+from .gap_down import GapDownStrategy
 from .momentum import MomentumStrategy
+from .volume_spike import VolumeSpikeStrategy
 
 REGISTRY: dict[str, type[Strategy]] = {
     "momentum": MomentumStrategy,
+    "gap_down": GapDownStrategy,
+    "volume_spike": VolumeSpikeStrategy,
 }
 
 
