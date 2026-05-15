@@ -9,8 +9,11 @@ from .compare import compare_strategies
 from .config import SimConfig, TradeCost
 from .engine import run_backtest
 from .forward import (
+    format_summary as forward_format,
+    get_universe_names,
     init_session as forward_init,
     list_sessions as forward_list,
+    run_all_sessions as forward_run_all,
     run_session as forward_run,
     status as forward_status,
 )
@@ -127,24 +130,22 @@ def _cmd_forward_init(args: argparse.Namespace) -> int:
 
 def _cmd_forward_run(args: argparse.Namespace) -> int:
     summary = forward_run(args.name, as_of=args.as_of)
-    s = summary["summary"]
-    print(f"\n=== {args.name} as of {summary['as_of']} ===")
-    print(f"strategy : {summary['strategy']}  {summary['params']}")
-    print(f"mode     : {summary['trade_mode']} / {summary['budget_mode']}")
-    print(f"initial  : {summary['initial_budget']:,.0f}")
-    if s:
-        print(f"total pnl: {s['total_pnl']:>14,.0f}  ({s['total_return']:+.2%})")
-        print(f"win rate : {s['win_rate']:.1%}  ({s['win_days']}/{s['trading_days']})")
-        print(f"sharpe~  : {s['sharpe_approx']:.2f}")
-    nxt = summary.get("next_picks", {})
-    picks = nxt.get("picks", [])
-    print(f"\n=== next picks (as_of {nxt.get('as_of')}) ===")
-    print(f"action: {nxt.get('next_action')}")
-    if not picks:
-        print("(none — strategy did not produce candidates)")
-    else:
-        for p in picks:
-            print(f"  - {p['code']:>8}  w={p['weight']:.3f}  {p['reason']}")
+    names = get_universe_names()
+    print(forward_format(summary, name_lookup=names))
+    return 0
+
+
+def _cmd_forward_run_all(args: argparse.Namespace) -> int:
+    results = forward_run_all(as_of=args.as_of)
+    if not results:
+        print("(no forward sessions found — use 'jusik forward init <name> ...' first)")
+        return 0
+    names = get_universe_names()
+    for r in results:
+        if "error" in r:
+            print(f"\n❌ {r['name']}: {r['error']}")
+        else:
+            print(forward_format(r, name_lookup=names))
     return 0
 
 
@@ -213,6 +214,10 @@ def main(argv: list[str] | None = None) -> int:
     fr.add_argument("--as-of", type=_parse_date, default=None,
                     help="treat this date as 'yesterday' (debug only)")
     fr.set_defaults(func=_cmd_forward_run)
+
+    fra = fwsub.add_parser("run-all", help="run every forward session in one go")
+    fra.add_argument("--as-of", type=_parse_date, default=None)
+    fra.set_defaults(func=_cmd_forward_run_all)
 
     fs = fwsub.add_parser("status", help="show forward session status")
     fs.add_argument("name")

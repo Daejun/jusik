@@ -91,6 +91,10 @@ def init_session(
     return cfg
 
 
+def _format_won(amount: float) -> str:
+    return f"{amount:>14,.0f}원"
+
+
 def run_session(name: str, as_of: date | None = None) -> dict:
     cfg = _load_config(name)
     out = session_dir(name)
@@ -142,6 +146,22 @@ def run_session(name: str, as_of: date | None = None) -> dict:
     (out / "next_picks.json").write_text(json.dumps(next_picks, indent=2, ensure_ascii=False, default=str))
 
     summary["next_picks"] = next_picks
+
+    # last few closed trades for the daily report
+    if not result.trades.empty:
+        recent = result.trades.sort_values("date", ascending=False).head(8)
+        summary["recent_trades"] = recent.to_dict(orient="records")
+    else:
+        summary["recent_trades"] = []
+
+    # current equity for budget allocation
+    if not result.daily.empty:
+        last = result.daily.iloc[-1]
+        equity_now = (last["budget"] + last["pnl"]) if cfg.budget_mode == "compound" \
+            else cfg.initial_budget + last["cumulative_pnl"]
+    else:
+        equity_now = cfg.initial_budget
+    summary["current_equity"] = float(equity_now)
     return summary
 
 
@@ -165,11 +185,11 @@ def _suggest_next(strategy, panel: pd.DataFrame, cfg: ForwardConfig, end: date) 
 
 def _next_action(mode, panel: pd.DataFrame, mode_name: str) -> str:
     if mode_name == "intraday":
-        return "buy at next session open, sell at same-day close"
+        return "다음 거래일 시가 매수 → 같은 날 종가 매도"
     if mode_name == "overnight":
-        return "buy at today's close (already executed), sell at next session open"
+        return "다음 거래일 종가 매수 → 그 다음 거래일 시가 매도"
     if mode_name == "multiday5":
-        return "buy at next session open, sell at close of 5th trading day"
+        return "다음 거래일 시가 매수 → 5거래일 후 종가 매도"
     return ""
 
 
@@ -190,6 +210,102 @@ def _plot_equity(result, cfg: ForwardConfig, path: Path) -> None:
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
+
+
+def format_summary(summary: dict, name_lookup: dict[str, str] | None = None) -> str:
+    """Render run_session output as a friendly multi-line block."""
+    name_lookup = name_lookup or {}
+    name = summary["name"]
+    asof = summary["as_of"]
+    s = summary.get("summary", {}) or {}
+    params = summary.get("params", {})
+    initial = summary.get("initial_budget", 0)
+    equity = summary.get("current_equity", initial)
+    pnl_abs = equity - initial
+
+    bar = "━" * 60
+    lines = [
+        "",
+        bar,
+        f"  📌 {name}   ({asof} 기준)",
+        f"     {summary.get('strategy', '')}({', '.join(f'{k}={v}' for k,v in params.items())})",
+        f"     {summary.get('trade_mode', '')} / {summary.get('budget_mode', '')}",
+        bar,
+        "",
+        "📊 누적 성과",
+        f"    초기예산        {initial:>14,.0f} 원",
+        f"    현재자본        {equity:>14,.0f} 원  ({(equity/initial - 1) if initial else 0:+.2%})",
+        f"    누적 손익       {pnl_abs:>+14,.0f} 원",
+    ]
+    if s:
+        lines += [
+            f"    승률            {s.get('win_rate',0):.1%}  "
+            f"({s.get('win_days',0)}승 {s.get('trading_days',0)-s.get('win_days',0)}패)",
+            f"    Sharpe~         {s.get('sharpe_approx',0):.2f}",
+            f"    최고/최저 일수익  {s.get('max_daily_gain',0):+.2%}  /  {s.get('max_daily_loss',0):+.2%}",
+        ]
+
+    recent = summary.get("recent_trades") or []
+    if recent:
+        last_date = recent[0]["date"]
+        lines += ["", f"📉 최근 청산 (마지막: {str(last_date)[:10]})"]
+        day_pnl = 0.0
+        latest = [r for r in recent if str(r["date"])[:10] == str(last_date)[:10]]
+        for r in latest[:6]:
+            name_kr = name_lookup.get(r["code"], "")
+            arrow = "↑" if r["pnl"] >= 0 else "↓"
+            lines.append(
+                f"    {r['code']:>8} {name_kr:<8} "
+                f"{int(r['shares']):>4}주  "
+                f"{r['open_price']:>9,.0f}→{r['close_price']:>9,.0f}  "
+                f"{arrow}{r['pnl']:>+11,.0f} 원 ({r['return_pct']:+.2%})"
+            )
+            day_pnl += r["pnl"]
+        if latest:
+            lines.append(f"    {'합계':>13}                                {day_pnl:>+11,.0f} 원")
+
+    nxt = summary.get("next_picks") or {}
+    picks = nxt.get("picks", [])
+    lines += ["", "🔔 다음 거래일 진입 추천", f"    {nxt.get('next_action', '')}"]
+    if not picks:
+        lines.append("    (없음 — 전략이 후보를 찾지 못함)")
+    else:
+        for p in picks:
+            name_kr = name_lookup.get(p["code"], "")
+            alloc = equity * p["weight"]
+            lines.append(
+                f"    매수 {p['code']:>8} {name_kr:<8}  w={p['weight']:.0%}  "
+                f"배분={alloc:>13,.0f} 원   ({p['reason']})"
+            )
+
+    lines += ["", f"📈 results/forward/{name}/equity.png", ""]
+    return "\n".join(lines)
+
+
+def run_all_sessions(as_of: date | None = None) -> list[dict]:
+    names = list_sessions()
+    if not names:
+        return []
+    results: list[dict] = []
+    for n in names:
+        try:
+            results.append(run_session(n, as_of=as_of))
+        except Exception as e:  # noqa: BLE001
+            log.error("session %s failed: %s", n, e)
+            results.append({"name": n, "error": str(e)})
+    return results
+
+
+def get_universe_names() -> dict[str, str]:
+    """Best-effort: load cached universe with Korean names."""
+    from .data import UNIVERSE_FILE
+    if not UNIVERSE_FILE.exists():
+        return {}
+    try:
+        df = pd.read_parquet(UNIVERSE_FILE)
+        return dict(zip(df["Code"].astype(str), df["Name"].astype(str)))
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def status(name: str) -> dict:
