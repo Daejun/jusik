@@ -6,18 +6,6 @@ import pandas as pd
 from .base import Pick, Strategy
 
 
-def _rsi(series: pd.Series, period: int) -> float:
-    if len(series) < period + 1:
-        return float("nan")
-    diff = series.diff().dropna().tail(period)
-    gain = diff.clip(lower=0).mean()
-    loss = -diff.clip(upper=0).mean()
-    if loss == 0:
-        return 100.0
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-
 class RsiReversalStrategy(Strategy):
     """Oversold reversal: buy names whose RSI is below `threshold`.
 
@@ -49,29 +37,24 @@ class RsiReversalStrategy(Strategy):
         dates = sorted(hist["date"].unique())
         if len(dates) < self.period + 2:
             return []
-        last_date = dates[-1]
         window_dates = dates[-(self.period + 1):]
         window = hist[hist["date"].isin(window_dates)]
 
-        rows = []
-        for code, g in window.groupby("code"):
-            g = g.sort_values("date")
-            rsi = _rsi(g["Close"], self.period)
-            if np.isnan(rsi):
-                continue
-            last = g[g["date"] == last_date]
-            if last.empty:
-                continue
-            rows.append({
-                "code": code,
-                "rsi": rsi,
-                "last_close": float(last["Close"].iloc[0]),
-                "avg_vol": float(g["Volume"].mean()),
-            })
+        close = window.pivot(index="date", columns="code", values="Close").sort_index()
+        vol = window.pivot(index="date", columns="code", values="Volume").sort_index()
 
-        df = pd.DataFrame(rows).set_index("code")
-        if df.empty:
-            return []
+        diff = close.diff().iloc[1:]
+        gain = diff.clip(lower=0).mean()
+        loss = (-diff.clip(upper=0)).mean()
+        rs = gain / loss.replace(0, np.nan)
+        rsi = 100 - (100 / (1 + rs))
+        rsi = rsi.fillna(100.0)
+
+        df = pd.DataFrame({
+            "rsi": rsi,
+            "last_close": close.iloc[-1],
+            "avg_vol": vol.mean(),
+        }).dropna()
         df = df[(df["last_close"] >= self.min_price) & (df["avg_vol"] >= self.min_avg_volume)]
         df = df[df["rsi"] <= self.threshold]
         df = df.sort_values("rsi", ascending=True).head(self.top_n)

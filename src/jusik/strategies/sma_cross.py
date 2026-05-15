@@ -9,8 +9,7 @@ class SmaCrossStrategy(Strategy):
     """Pick names whose short SMA is most above its long SMA on close basis.
 
     Score = SMA_short / SMA_long - 1.  Positive ranking emphasises trend
-    continuation.  Optionally require the short SMA crossed *up* through long
-    SMA today (fresh signal).
+    continuation.  Optionally require a fresh crossover this bar.
     """
 
     name = "sma_cross"
@@ -43,45 +42,30 @@ class SmaCrossStrategy(Strategy):
         dates = sorted(hist["date"].unique())
         if len(dates) < self.long + 1:
             return []
-        window = hist[hist["date"].isin(dates[-(self.long + 1):])]
-        last_date = dates[-1]
-        prev_date = dates[-2]
+        window_dates = dates[-(self.long + 1):]
+        window = hist[hist["date"].isin(window_dates)]
 
-        def _sma(g: pd.DataFrame, n: int, end: pd.Timestamp) -> float:
-            tail = g[g["date"] <= end].tail(n)
-            return tail["Close"].mean() if len(tail) == n else float("nan")
+        close = window.pivot(index="date", columns="code", values="Close").sort_index()
+        vol = window.pivot(index="date", columns="code", values="Volume").sort_index()
 
-        rows = []
-        for code, g in window.groupby("code"):
-            short_now = _sma(g, self.short, last_date)
-            long_now = _sma(g, self.long, last_date)
-            if pd.isna(short_now) or pd.isna(long_now):
-                continue
-            score = short_now / long_now - 1
-            last = g[g["date"] == last_date]
-            if last.empty:
-                continue
-            last_close = float(last["Close"].iloc[0])
-            avg_vol = float(g["Volume"].mean())
-            cross_up = False
-            if self.fresh_only:
-                short_prev = _sma(g, self.short, prev_date)
-                long_prev = _sma(g, self.long, prev_date)
-                cross_up = (short_prev <= long_prev) and (short_now > long_now)
-            rows.append({
-                "code": code,
-                "score": score,
-                "last_close": last_close,
-                "avg_vol": avg_vol,
-                "cross_up": cross_up,
-            })
+        short_now = close.tail(self.short).mean()
+        long_now = close.tail(self.long).mean()
+        score = short_now / long_now - 1
 
-        df = pd.DataFrame(rows).set_index("code")
-        if df.empty:
-            return []
-        df = df[(df["last_close"] >= self.min_price) & (df["avg_vol"] >= self.min_avg_volume)]
-        if self.fresh_only:
+        df = pd.DataFrame({
+            "score": score,
+            "last_close": close.iloc[-1],
+            "avg_vol": vol.mean(),
+        }).dropna()
+
+        if self.fresh_only and len(close) >= self.long + 1:
+            short_prev = close.iloc[-(self.short + 1):-1].mean()
+            long_prev = close.iloc[-(self.long + 1):-1].mean()
+            cross_up = (short_prev <= long_prev) & (short_now > long_now)
+            df["cross_up"] = cross_up.reindex(df.index, fill_value=False)
             df = df[df["cross_up"]]
+
+        df = df[(df["last_close"] >= self.min_price) & (df["avg_vol"] >= self.min_avg_volume)]
         df = df[df["score"] > 0]
         df = df.sort_values("score", ascending=False).head(self.top_n)
         if df.empty:

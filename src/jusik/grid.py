@@ -22,12 +22,12 @@ log = logging.getLogger(__name__)
 
 # default grids per strategy: lists of param dicts to materialise
 DEFAULT_GRIDS: dict[str, dict[str, list]] = {
-    "momentum": {"top_n": [3, 5, 10], "lookback": [1, 3, 5]},
-    "gap_down": {"top_n": [3, 5, 10], "lookback": [1, 3]},
-    "volume_spike": {"top_n": [3, 5, 10], "window": [10, 20], "require_green": [True, False]},
-    "sma_cross": {"top_n": [3, 5, 10], "short": [5], "long": [20, 60], "fresh_only": [True, False]},
-    "rsi": {"top_n": [3, 5, 10], "period": [14], "threshold": [25.0, 30.0, 35.0]},
-    "low_vol": {"top_n": [5, 10], "window": [20, 60]},
+    "momentum": {"top_n": [3, 5], "lookback": [1, 3]},
+    "gap_down": {"top_n": [3, 5], "lookback": [1, 3]},
+    "volume_spike": {"top_n": [3, 5], "window": [20], "require_green": [True, False]},
+    "sma_cross": {"top_n": [3, 5], "short": [5], "long": [20, 60], "fresh_only": [False]},
+    "rsi": {"top_n": [3, 5], "period": [14], "threshold": [25.0, 30.0]},
+    "low_vol": {"top_n": [5], "window": [20, 60]},
     "benchmark": {"code": ["069500"]},
 }
 

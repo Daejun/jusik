@@ -8,8 +8,8 @@ from .base import Pick, Strategy
 class LowVolStrategy(Strategy):
     """Pick names with lowest realised volatility over `window` days.
 
-    Acts as a defensive baseline; tends to produce small, steady returns
-    rather than fireworks.
+    Defensive baseline; tends to produce small, steady returns rather than
+    fireworks.
     """
 
     name = "low_vol"
@@ -37,30 +37,22 @@ class LowVolStrategy(Strategy):
             return []
         window_dates = dates[-self.window:]
         window = hist[hist["date"].isin(window_dates)]
-        last_date = dates[-1]
 
-        rows = []
-        for code, g in window.groupby("code"):
-            g = g.sort_values("date")
-            ret = g["Close"].pct_change().dropna()
-            if len(ret) < self.window - 1:
-                continue
-            last = g[g["date"] == last_date]
-            if last.empty:
-                continue
-            rows.append({
-                "code": code,
-                "vol": float(ret.std()),
-                "last_close": float(last["Close"].iloc[0]),
-                "avg_vol": float(g["Volume"].mean()),
-            })
-        df = pd.DataFrame(rows).set_index("code")
-        if df.empty:
-            return []
+        close = window.pivot(index="date", columns="code", values="Close").sort_index()
+        vol = window.pivot(index="date", columns="code", values="Volume").sort_index()
+
+        rets = close.pct_change().iloc[1:]
+        sigma = rets.std()
+
+        df = pd.DataFrame({
+            "sigma": sigma,
+            "last_close": close.iloc[-1],
+            "avg_vol": vol.mean(),
+        }).dropna()
         df = df[(df["last_close"] >= self.min_price) & (df["avg_vol"] >= self.min_avg_volume)]
-        df = df[df["vol"] > 0]
-        df = df.sort_values("vol", ascending=True).head(self.top_n)
+        df = df[df["sigma"] > 0]
+        df = df.sort_values("sigma", ascending=True).head(self.top_n)
         if df.empty:
             return []
         w = 1.0 / len(df)
-        return [Pick(code=c, weight=w, reason=f"sigma={r.vol:.3%}") for c, r in df.iterrows()]
+        return [Pick(code=c, weight=w, reason=f"sigma={r.sigma:.3%}") for c, r in df.iterrows()]
