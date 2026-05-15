@@ -45,6 +45,29 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_grid(args: argparse.Namespace) -> int:
+    from .grid import DEFAULT_GRIDS, run_grid
+    cfg = SimConfig(budget=args.budget, universe_size=args.universe)
+    grids = DEFAULT_GRIDS
+    if args.strategies:
+        grids = {k: v for k, v in DEFAULT_GRIDS.items() if k in args.strategies}
+    out = run_grid(
+        start=args.start, end=args.end, config=cfg,
+        budget_mode=args.budget_mode, grids=grids,
+        extra_codes=["069500"] if "benchmark" in grids else None,
+    )
+    import pandas as pd
+    lb = pd.read_csv(out / "leaderboard.csv")
+    print("\n=== TOP 15 by Sharpe ===")
+    cols = ["label", "total_return", "win_rate", "sharpe_approx",
+            "avg_daily_return", "max_daily_loss"]
+    with pd.option_context("display.float_format", lambda x: f"{x:.4f}",
+                           "display.max_colwidth", 60, "display.width", 200):
+        print(lb.head(15)[cols].to_string(index=False))
+    print(f"\nartifacts: {out}")
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     cfg = SimConfig(budget=args.budget, top_n=args.top_n, universe_size=args.universe)
     specs = [{"name": s, "params": {"top_n": args.top_n}} for s in args.strategies]
@@ -91,6 +114,16 @@ def main(argv: list[str] | None = None) -> int:
 
     ls = sub.add_parser("list", help="list strategies")
     ls.set_defaults(func=_cmd_list)
+
+    gr = sub.add_parser("grid", help="parameter grid search across strategies")
+    gr.add_argument("--start", type=_parse_date, default=today - timedelta(days=730))
+    gr.add_argument("--end", type=_parse_date, default=today - timedelta(days=1))
+    gr.add_argument("--budget", type=float, default=10_000_000)
+    gr.add_argument("--universe", type=int, default=200)
+    gr.add_argument("--budget-mode", choices=["fixed", "compound"], default="fixed")
+    gr.add_argument("--strategies", nargs="+", default=None,
+                    help="subset of strategies (default: all in grid)")
+    gr.set_defaults(func=_cmd_grid)
 
     cmp = sub.add_parser("compare", help="run all strategies and compare")
     cmp.add_argument("--strategies", nargs="+", default=list(REGISTRY))
