@@ -1,6 +1,6 @@
 {
   "name": "lowvol_multi5_w60",
-  "as_of": "2026-05-18",
+  "as_of": "2026-05-19",
   "strategy": "low_vol",
   "params": {
     "top_n": 5,

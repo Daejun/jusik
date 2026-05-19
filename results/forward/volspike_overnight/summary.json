@@ -1,6 +1,6 @@
 {
   "name": "volspike_overnight",
-  "as_of": "2026-05-18",
+  "as_of": "2026-05-19",
   "strategy": "volume_spike",
   "params": {
     "top_n": 3,
@@ -11,15 +11,15 @@
   "budget_mode": "compound",
   "initial_budget": 10000000.0,
   "summary": {
-    "total_pnl": 318916.00000000047,
-    "total_return": 0.03189160000000002,
-    "trading_days": 1,
+    "total_pnl": -102219.78499999922,
+    "total_return": -0.010221978500000062,
+    "trading_days": 2,
     "win_days": 1,
-    "win_rate": 1.0,
-    "avg_daily_return": 0.03189160000000005,
-    "stdev_daily_return": 0.0,
-    "sharpe_approx": 0.0,
+    "win_rate": 0.5,
+    "avg_daily_return": -0.004460208974198413,
+    "stdev_daily_return": 0.05140922126810745,
+    "sharpe_approx": -1.377255299732953,
     "max_daily_gain": 0.03189160000000005,
-    "max_daily_loss": 0.03189160000000005
+    "max_daily_loss": -0.040812017948396874
   }
 }
