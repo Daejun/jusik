@@ -1,0 +1,13 @@
+{
+  "name": "lowvol_multi5_w60",
+  "as_of": "2026-05-18",
+  "strategy": "low_vol",
+  "params": {
+    "top_n": 5,
+    "window": 60
+  },
+  "trade_mode": "multiday5",
+  "budget_mode": "compound",
+  "initial_budget": 10000000.0,
+  "summary": {}
+}

@@ -6,9 +6,13 @@ venv/
 .env
 
 data/cache/
-results/
-reports/
 *.parquet
+# Ignore backtest/grid/walkforward outputs but keep forward session state so
+# scheduled runs (Routines) can persist cumulative equity across days.
+results/*
+!results/forward/
+results/forward/*/equity.png
+results/forward/*/next_picks.json
 
 .pytest_cache/
 .ruff_cache/

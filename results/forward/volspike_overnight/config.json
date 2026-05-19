@@ -1,0 +1,14 @@
+{
+  "name": "volspike_overnight",
+  "start_date": "2026-05-15",
+  "strategy_name": "volume_spike",
+  "strategy_params": {
+    "top_n": 3,
+    "window": 20,
+    "require_green": false
+  },
+  "trade_mode": "overnight",
+  "budget_mode": "compound",
+  "initial_budget": 10000000.0,
+  "universe_size": 200
+}

@@ -1,0 +1,13 @@
+{
+  "name": "lowvol_multi5",
+  "start_date": "2026-05-15",
+  "strategy_name": "low_vol",
+  "strategy_params": {
+    "top_n": 5,
+    "window": 20
+  },
+  "trade_mode": "multiday5",
+  "budget_mode": "compound",
+  "initial_budget": 10000000.0,
+  "universe_size": 200
+}
